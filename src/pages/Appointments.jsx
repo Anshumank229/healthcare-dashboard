@@ -100,14 +100,13 @@ export default function Appointments() {
   };
 
   const getStatusBadge = (status) => {
-    const colors = {
-      scheduled: 'bg-yellow-100 text-yellow-700',
-      confirmed: 'bg-green-100 text-green-700',
-      cancelled: 'bg-red-100 text-red-700',
-      completed: 'bg-gray-100 text-gray-700',
-      no_show: 'bg-orange-100 text-orange-700'
-    };
-    return <span className={px-2 py-1 rounded-full text-xs font-medium }>{status}</span>;
+    let colorClass = 'bg-gray-100 text-gray-700';
+    if (status === 'scheduled') colorClass = 'bg-yellow-100 text-yellow-700';
+    if (status === 'confirmed') colorClass = 'bg-green-100 text-green-700';
+    if (status === 'cancelled') colorClass = 'bg-red-100 text-red-700';
+    if (status === 'completed') colorClass = 'bg-gray-100 text-gray-700';
+    if (status === 'no_show') colorClass = 'bg-orange-100 text-orange-700';
+    return <span className={'px-2 py-1 rounded-full text-xs font-medium ' + colorClass}>{status}</span>;
   };
 
   if (isLoading) {
@@ -156,11 +155,9 @@ export default function Appointments() {
                   <td className="px-4 py-3">{apt.reason || '-'}</td>
                   <td className="px-4 py-3">
                     {apt.status !== 'cancelled' && (
-                      <>
-                        <button onClick={() => cancelMutation.mutate(apt.id)} className="text-red-600 hover:text-red-800 mr-3">
-                          <FaTimes size={16} />
-                        </button>
-                      </>
+                      <button onClick={() => cancelMutation.mutate(apt.id)} className="text-red-600 hover:text-red-800">
+                        <FaTimes size={16} />
+                      </button>
                     )}
                   </td>
                 </tr>

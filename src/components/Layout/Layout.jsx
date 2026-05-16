@@ -42,7 +42,7 @@ export default function Layout({ children }) {
         {sidebarOpen ? <FaTimes size={20} /> : <FaBars size={20} />}
       </button>
 
-      <aside className={ixed top-0 left-0 z-40 w-64 h-screen bg-gradient-to-b from-blue-800 to-blue-900 transition-transform duration-300 ease-in-out }>
+      <aside className={'fixed top-0 left-0 z-40 w-64 h-screen bg-gradient-to-b from-blue-800 to-blue-900 transition-transform duration-300 ease-in-out ' + (sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0')}>
         <div className="p-5">
           <div className="flex items-center gap-2 mb-8">
             <FaUserMd className="text-white text-3xl" />
