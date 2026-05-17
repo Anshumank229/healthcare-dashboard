@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import api from '../services/api';
-import { FaPlus, FaCalendarAlt, FaTimes, FaClock, FaUser } from 'react-icons/fa';
+import { FaPlus, FaCalendarAlt, FaTimes, FaClock, FaUser, FaBell } from 'react-icons/fa';
 import { ContentCard } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -25,12 +25,37 @@ export default function Appointments() {
   const [currentPage, setCurrentPage] = useState(1);
   const debouncedSearch = useDebounce(searchQuery);
 
-  const [formData, setFormData] = useState({
-    patient_id: '', doctor_id: '', appointment_date: '',
-    duration_minutes: 30, reason: '', notes: ''
+  // Get current logged-in user
+  const { data: currentUser } = useQuery({
+    queryKey: ['currentUser'],
+    queryFn: async () => {
+      const response = await api.get('/auth/me');
+      return response.data;
+    }
   });
 
-  const { data: patients } = useQuery({
+  // Get patient ID for current user (if they are a patient)
+  const { data: currentPatient } = useQuery({
+    queryKey: ['currentPatient', currentUser?.id],
+    queryFn: async () => {
+      if (currentUser?.role !== 'patient') return null;
+      const response = await api.get('/patients/');
+      const patient = response.data.find(p => p.user_id === currentUser.id);
+      return patient;
+    },
+    enabled: !!currentUser
+  });
+
+  const [formData, setFormData] = useState({
+    patient_id: '',
+    doctor_id: '',
+    appointment_date: '',
+    duration_minutes: 30,
+    reason: '',
+    notes: ''
+  });
+
+  const { data: patients, isLoading: patientsLoading } = useQuery({
     queryKey: ['patients'],
     queryFn: async () => {
       const response = await api.get('/patients/');
@@ -46,6 +71,13 @@ export default function Appointments() {
     }
   });
 
+  // Auto-select patient for patient role
+  useEffect(() => {
+    if (currentPatient && !formData.patient_id) {
+      setFormData(prev => ({ ...prev, patient_id: currentPatient.id }));
+    }
+  }, [currentPatient]);
+
   const createMutation = useMutation({
     mutationFn: async (data) => {
       const response = await api.post('/appointments/', data);
@@ -53,7 +85,7 @@ export default function Appointments() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['appointments']);
-      toast.success('Appointment booked successfully');
+      toast.success('✅ Appointment booked successfully! WhatsApp reminder will be sent 24 hours before.');
       setShowModal(false);
       resetForm();
     },
@@ -88,8 +120,12 @@ export default function Appointments() {
 
   const resetForm = () => {
     setFormData({
-      patient_id: '', doctor_id: '', appointment_date: '',
-      duration_minutes: 30, reason: '', notes: ''
+      patient_id: currentPatient?.id || '',
+      doctor_id: '',
+      appointment_date: '',
+      duration_minutes: 30,
+      reason: '',
+      notes: ''
     });
   };
 
@@ -108,28 +144,40 @@ export default function Appointments() {
     return patient ? `${patient.first_name} ${patient.last_name}` : `Patient #${patientId}`;
   };
 
-  // Filter + paginate
+  // Get patient phone for WhatsApp info
+  const getPatientPhone = (patientId) => {
+    const patient = patients?.find(p => p.id === patientId);
+    return patient?.phone || 'No phone number';
+  };
+
+  // Filter + paginate based on user role
   const filteredAppointments = useMemo(() => {
     if (!appointments) return [];
     let filtered = appointments;
+
+    // If patient is logged in, only show their appointments
+    if (currentUser?.role === 'patient' && currentPatient) {
+      filtered = filtered.filter(a => a.patient_id === currentPatient.id);
+    }
+
     if (statusFilter) {
       filtered = filtered.filter(a => a.status === statusFilter);
     }
     if (debouncedSearch) {
       const q = debouncedSearch.toLowerCase();
       filtered = filtered.filter(a =>
-        String(a.id).includes(q) ||
-        (a.reason || '').toLowerCase().includes(q) ||
-        getPatientName(a.patient_id).toLowerCase().includes(q)
+          String(a.id).includes(q) ||
+          (a.reason || '').toLowerCase().includes(q) ||
+          getPatientName(a.patient_id).toLowerCase().includes(q)
       );
     }
     return filtered;
-  }, [appointments, statusFilter, debouncedSearch, patients]);
+  }, [appointments, statusFilter, debouncedSearch, patients, currentUser, currentPatient]);
 
   const totalPages = Math.ceil(filteredAppointments.length / ITEMS_PER_PAGE);
   const paginatedAppointments = filteredAppointments.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
+      (currentPage - 1) * ITEMS_PER_PAGE,
+      currentPage * ITEMS_PER_PAGE
   );
 
   useMemo(() => setCurrentPage(1), [debouncedSearch, statusFilter]);
@@ -142,199 +190,268 @@ export default function Appointments() {
     { value: 'no_show', label: 'No Show' },
   ];
 
+  const isPatient = currentUser?.role === 'patient';
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'staff';
+
+  // Available doctors list (you can fetch from API or hardcode)
+  const availableDoctors = [
+    { id: 1, name: 'Dr. Smith', specialty: 'General Physician' },
+    { id: 2, name: 'Dr. Johnson', specialty: 'Cardiologist' },
+    { id: 3, name: 'Dr. Williams', specialty: 'Dermatologist' },
+  ];
+
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-900 dark:text-surface-100">Appointments</h1>
-          <p className="text-sm text-surface-500 dark:text-surface-400 mt-0.5">
-            Schedule and manage appointments • {appointments?.length || 0} total
-          </p>
-        </div>
-        <Button
-          icon={FaPlus}
-          onClick={() => { setEditingAppointment(null); resetForm(); setShowModal(true); }}
-        >
-          Book Appointment
-        </Button>
-      </div>
-
-      {/* Search + Filter */}
-      <SearchFilter
-        searchValue={searchQuery}
-        onSearchChange={setSearchQuery}
-        placeholder="Search by ID, patient, or reason..."
-        filters={[{
-          key: 'status',
-          value: statusFilter,
-          onChange: setStatusFilter,
-          placeholder: 'All Statuses',
-          options: statusOptions,
-        }]}
-      />
-
-      {/* Table */}
-      <ContentCard noPadding>
-        {isLoading ? (
-          <div className="p-4"><SkeletonTable rows={6} cols={6} /></div>
-        ) : isError ? (
-          <EmptyState title="Failed to load appointments" description="Please try again" action={refetch} actionLabel="Retry" />
-        ) : paginatedAppointments.length === 0 ? (
-          <EmptyState
-            icon={FaCalendarAlt}
-            title={debouncedSearch || statusFilter ? 'No appointments found' : 'No appointments yet'}
-            description={debouncedSearch || statusFilter ? 'Try different filters' : 'Book your first appointment'}
-            action={!debouncedSearch && !statusFilter ? () => { resetForm(); setShowModal(true); } : undefined}
-            actionLabel="Book Appointment"
-          />
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-surface-100 dark:border-surface-700">
-                    <th className="px-5 py-3.5 text-left text-xs font-semibold text-surface-500 dark:text-surface-400 uppercase tracking-wider">ID</th>
-                    <th className="px-5 py-3.5 text-left text-xs font-semibold text-surface-500 dark:text-surface-400 uppercase tracking-wider">Patient</th>
-                    <th className="px-5 py-3.5 text-left text-xs font-semibold text-surface-500 dark:text-surface-400 uppercase tracking-wider hidden md:table-cell">Date & Time</th>
-                    <th className="px-5 py-3.5 text-left text-xs font-semibold text-surface-500 dark:text-surface-400 uppercase tracking-wider">Status</th>
-                    <th className="px-5 py-3.5 text-left text-xs font-semibold text-surface-500 dark:text-surface-400 uppercase tracking-wider hidden lg:table-cell">Reason</th>
-                    <th className="px-5 py-3.5 text-right text-xs font-semibold text-surface-500 dark:text-surface-400 uppercase tracking-wider">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedAppointments.map((apt) => (
-                    <tr key={apt.id} className="border-b border-surface-50 dark:border-surface-800 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors">
-                      <td className="px-5 py-3.5">
-                        <span className="text-xs font-mono bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300 px-2 py-0.5 rounded">#{apt.id}</span>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-full bg-healthcare-50 dark:bg-healthcare-900/30 flex items-center justify-center flex-shrink-0">
-                            <FaUser className="text-healthcare-600 dark:text-healthcare-400" size={12} />
-                          </div>
-                          <div>
-                            <p className="font-medium text-surface-800 dark:text-surface-200 text-sm">{getPatientName(apt.patient_id)}</p>
-                            <p className="text-xs text-surface-400">Doctor #{apt.doctor_id}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5 hidden md:table-cell">
-                        <div>
-                          <p className="text-surface-800 dark:text-surface-200 text-sm">{new Date(apt.appointment_date).toLocaleDateString()}</p>
-                          <p className="text-xs text-surface-400 flex items-center gap-1">
-                            <FaClock size={10} />
-                            {new Date(apt.appointment_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <StatusBadge status={apt.status} />
-                      </td>
-                      <td className="px-5 py-3.5 hidden lg:table-cell">
-                        <p className="text-surface-600 dark:text-surface-400 truncate max-w-[200px]">{apt.reason || '—'}</p>
-                      </td>
-                      <td className="px-5 py-3.5 text-right">
-                        {apt.status !== 'cancelled' && apt.status !== 'completed' && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            icon={FaTimes}
-                            onClick={() => cancelMutation.mutate(apt.id)}
-                            loading={cancelMutation.isPending}
-                            className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
-                          >
-                            Cancel
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="px-5 py-3 border-t border-surface-100 dark:border-surface-700">
-              <Pagination
-                currentPage={currentPage}
-                totalPages={totalPages}
-                totalItems={filteredAppointments.length}
-                itemsPerPage={ITEMS_PER_PAGE}
-                onPageChange={setCurrentPage}
-              />
-            </div>
-          </>
-        )}
-      </ContentCard>
-
-      {/* Book/Edit Modal */}
-      <Modal
-        isOpen={showModal}
-        onClose={() => { setShowModal(false); setEditingAppointment(null); }}
-        title={editingAppointment ? 'Edit Appointment' : 'Book Appointment'}
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => { setShowModal(false); setEditingAppointment(null); }}>Cancel</Button>
-            <Button
-              loading={createMutation.isPending || updateMutation.isPending}
-              onClick={handleSubmit}
-            >
-              {editingAppointment ? 'Update' : 'Book Appointment'}
-            </Button>
-          </>
-        }
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-4">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Patient</label>
-            <select
-              required
-              className="w-full px-4 py-2.5 rounded-xl border border-surface-200 bg-white text-surface-800
+            <h1 className="text-2xl font-bold text-surface-900 dark:text-surface-100">
+              {isPatient ? 'My Appointments' : 'Appointments'}
+            </h1>
+            <p className="text-sm text-surface-500 dark:text-surface-400 mt-0.5">
+              {isPatient ? 'View and manage your appointments' : `Schedule and manage appointments • ${appointments?.length || 0} total`}
+            </p>
+          </div>
+          <Button
+              icon={FaPlus}
+              onClick={() => { setEditingAppointment(null); resetForm(); setShowModal(true); }}
+          >
+            Book Appointment
+          </Button>
+        </div>
+
+        {/* Search + Filter - Only show for admin */}
+        {isAdmin && (
+            <SearchFilter
+                searchValue={searchQuery}
+                onSearchChange={setSearchQuery}
+                placeholder="Search by ID, patient, or reason..."
+                filters={[{
+                  key: 'status',
+                  value: statusFilter,
+                  onChange: setStatusFilter,
+                  placeholder: 'All Statuses',
+                  options: statusOptions,
+                }]}
+            />
+        )}
+
+        {/* Table */}
+        <ContentCard noPadding>
+          {isLoading ? (
+              <div className="p-4"><SkeletonTable rows={6} cols={isPatient ? 5 : 6} /></div>
+          ) : isError ? (
+              <EmptyState title="Failed to load appointments" description="Please try again" action={refetch} actionLabel="Retry" />
+          ) : paginatedAppointments.length === 0 ? (
+              <EmptyState
+                  icon={FaCalendarAlt}
+                  title={debouncedSearch || statusFilter ? 'No appointments found' : 'No appointments yet'}
+                  description={debouncedSearch || statusFilter ? 'Try different filters' : 'Book your first appointment'}
+                  action={!debouncedSearch && !statusFilter ? () => { resetForm(); setShowModal(true); } : undefined}
+                  actionLabel="Book Appointment"
+              />
+          ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                    <tr className="border-b border-surface-100 dark:border-surface-700">
+                      <th className="px-5 py-3.5 text-left text-xs font-semibold text-surface-500 dark:text-surface-400 uppercase tracking-wider">ID</th>
+                      <th className="px-5 py-3.5 text-left text-xs font-semibold text-surface-500 dark:text-surface-400 uppercase tracking-wider">Patient</th>
+                      <th className="px-5 py-3.5 text-left text-xs font-semibold text-surface-500 dark:text-surface-400 uppercase tracking-wider hidden md:table-cell">Date & Time</th>
+                      <th className="px-5 py-3.5 text-left text-xs font-semibold text-surface-500 dark:text-surface-400 uppercase tracking-wider">Status</th>
+                      <th className="px-5 py-3.5 text-left text-xs font-semibold text-surface-500 dark:text-surface-400 uppercase tracking-wider hidden lg:table-cell">Reason</th>
+                      <th className="px-5 py-3.5 text-right text-xs font-semibold text-surface-500 dark:text-surface-400 uppercase tracking-wider">Actions</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {paginatedAppointments.map((apt) => (
+                        <tr key={apt.id} className="border-b border-surface-50 dark:border-surface-800 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors">
+                          <td className="px-5 py-3.5">
+                            <span className="text-xs font-mono bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300 px-2 py-0.5 rounded">#{apt.id}</span>
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full bg-healthcare-50 dark:bg-healthcare-900/30 flex items-center justify-center flex-shrink-0">
+                                <FaUser className="text-healthcare-600 dark:text-healthcare-400" size={12} />
+                              </div>
+                              <div>
+                                <p className="font-medium text-surface-800 dark:text-surface-200 text-sm">{getPatientName(apt.patient_id)}</p>
+                                <p className="text-xs text-surface-400">Doctor #{apt.doctor_id}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5 hidden md:table-cell">
+                            <div>
+                              <p className="text-surface-800 dark:text-surface-200 text-sm">{new Date(apt.appointment_date).toLocaleDateString()}</p>
+                              <p className="text-xs text-surface-400 flex items-center gap-1">
+                                <FaClock size={10} />
+                                {new Date(apt.appointment_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <StatusBadge status={apt.status} />
+                          </td>
+                          <td className="px-5 py-3.5 hidden lg:table-cell">
+                            <p className="text-surface-600 dark:text-surface-400 truncate max-w-[200px]">{apt.reason || '—'}</p>
+                          </td>
+                          <td className="px-5 py-3.5 text-right">
+                            {apt.status !== 'cancelled' && apt.status !== 'completed' && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    icon={FaTimes}
+                                    onClick={() => cancelMutation.mutate(apt.id)}
+                                    loading={cancelMutation.isPending}
+                                    className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                >
+                                  Cancel
+                                </Button>
+                            )}
+                          </td>
+                        </tr>
+                    ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-5 py-3 border-t border-surface-100 dark:border-surface-700">
+                  <Pagination
+                      currentPage={currentPage}
+                      totalPages={totalPages}
+                      totalItems={filteredAppointments.length}
+                      itemsPerPage={ITEMS_PER_PAGE}
+                      onPageChange={setCurrentPage}
+                  />
+                </div>
+              </>
+          )}
+        </ContentCard>
+
+        {/* Book/Edit Modal */}
+        <Modal
+            isOpen={showModal}
+            onClose={() => { setShowModal(false); setEditingAppointment(null); }}
+            title={isPatient ? 'Book Appointment' : (editingAppointment ? 'Edit Appointment' : 'Book Appointment')}
+            size="lg"
+            footer={
+              <>
+                <Button variant="secondary" onClick={() => { setShowModal(false); setEditingAppointment(null); }}>Cancel</Button>
+                <Button
+                    loading={createMutation.isPending || updateMutation.isPending}
+                    onClick={handleSubmit}
+                >
+                  {editingAppointment ? 'Update' : 'Book Appointment'}
+                </Button>
+              </>
+            }
+        >
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Patient Selection - Hidden for patients, shown for admin */}
+            {isAdmin && (
+                <div>
+                  <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Patient</label>
+                  <select
+                      required
+                      className="w-full px-4 py-2.5 rounded-xl border border-surface-200 bg-white text-surface-800
+                  focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 transition-all duration-200
+                  dark:bg-surface-800 dark:border-surface-600 dark:text-surface-100"
+                      value={formData.patient_id}
+                      onChange={(e) => setFormData({ ...formData, patient_id: e.target.value })}
+                  >
+                    <option value="">Select Patient</option>
+                    {patients?.map((p) => (
+                        <option key={p.id} value={p.id}>{p.first_name} {p.last_name} - {p.phone || 'No phone'}</option>
+                    ))}
+                  </select>
+                </div>
+            )}
+
+            {/* Show patient info for patient role */}
+            {isPatient && currentPatient && (
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <FaBell className="text-blue-500" size={20} />
+                    <div>
+                      <p className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                        Booking for: <strong>{currentPatient.first_name} {currentPatient.last_name}</strong>
+                      </p>
+                      <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
+                        📱 WhatsApp reminders will be sent to: {currentPatient.phone || 'No phone number on file'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+            )}
+
+            {/* Doctor Selection */}
+            <div>
+              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Doctor</label>
+              <select
+                  required
+                  className="w-full px-4 py-2.5 rounded-xl border border-surface-200 bg-white text-surface-800
                 focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 transition-all duration-200
                 dark:bg-surface-800 dark:border-surface-600 dark:text-surface-100"
-              value={formData.patient_id}
-              onChange={(e) => setFormData({ ...formData, patient_id: e.target.value })}
-            >
-              <option value="">Select Patient</option>
-              {patients?.map((p) => (
-                <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>
-              ))}
-            </select>
-          </div>
-          <Input
-            label="Doctor ID"
-            type="number"
-            required
-            value={formData.doctor_id}
-            onChange={(e) => setFormData({ ...formData, doctor_id: e.target.value })}
-            placeholder="Enter doctor ID (e.g., 1, 2, 3)"
-          />
-          <Input
-            label="Date & Time"
-            type="datetime-local"
-            required
-            value={formData.appointment_date}
-            onChange={(e) => setFormData({ ...formData, appointment_date: e.target.value })}
-          />
-          <Input
-            label="Duration (minutes)"
-            type="number"
-            value={formData.duration_minutes}
-            onChange={(e) => setFormData({ ...formData, duration_minutes: e.target.value })}
-          />
-          <div>
-            <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Reason</label>
-            <textarea
-              className="w-full px-4 py-2.5 rounded-xl border border-surface-200 bg-white text-surface-800 placeholder:text-surface-400
+                  value={formData.doctor_id}
+                  onChange={(e) => setFormData({ ...formData, doctor_id: e.target.value })}
+              >
+                <option value="">Select Doctor</option>
+                {availableDoctors.map((doc) => (
+                    <option key={doc.id} value={doc.id}>{doc.name} - {doc.specialty}</option>
+                ))}
+              </select>
+              <p className="text-xs text-surface-500 mt-1">Need a different doctor? Contact admin to add more doctors</p>
+            </div>
+
+            <Input
+                label="Date & Time"
+                type="datetime-local"
+                required
+                value={formData.appointment_date}
+                onChange={(e) => setFormData({ ...formData, appointment_date: e.target.value })}
+                helperText="Select a future date and time"
+            />
+
+            <Input
+                label="Duration (minutes)"
+                type="number"
+                value={formData.duration_minutes}
+                onChange={(e) => setFormData({ ...formData, duration_minutes: e.target.value })}
+                helperText="Standard appointment duration is 30 minutes"
+            />
+
+            <div>
+              <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Reason</label>
+              <textarea
+                  className="w-full px-4 py-2.5 rounded-xl border border-surface-200 bg-white text-surface-800 placeholder:text-surface-400
                 focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 transition-all duration-200
                 dark:bg-surface-800 dark:border-surface-600 dark:text-surface-100 dark:placeholder:text-surface-500"
-              rows="2"
-              value={formData.reason}
-              onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
-              placeholder="Reason for visit"
-            />
-          </div>
-        </form>
-      </Modal>
-    </div>
+                  rows="2"
+                  value={formData.reason}
+                  onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+                  placeholder="Reason for visit"
+              />
+            </div>
+
+            {/* WhatsApp Reminder Info */}
+            <div className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded-xl">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0">
+                  <FaBell className="text-green-600 dark:text-green-400" size={14} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-300">WhatsApp Reminder</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+                    A reminder will be sent to your WhatsApp number 24 hours before the appointment.
+                  </p>
+                  <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                    Reply <strong>CONFIRM</strong> to confirm, or <strong>CANCEL</strong> to cancel.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </form>
+        </Modal>
+      </div>
   );
 }
