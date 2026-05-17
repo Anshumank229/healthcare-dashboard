@@ -1,3 +1,141 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply font-sans text-surface-800 bg-surface-50 transition-colors duration-300;
+  }
+
+  .dark body,
+  body.dark-body {
+    @apply bg-surface-950 text-surface-100;
+  }
+}
+
+@layer components {
+  /* Glassmorphism card */
+  .glass-card {
+    @apply bg-white/80 backdrop-blur-xl border border-white/20 shadow-glass;
+  }
+  .dark .glass-card {
+    @apply bg-surface-800/80 border-surface-700/50;
+  }
+
+  /* Skeleton shimmer */
+  .skeleton {
+    @apply relative overflow-hidden bg-surface-200 rounded-lg;
+    background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite linear;
+  }
+  .dark .skeleton {
+    background: linear-gradient(90deg, #334155 25%, #475569 50%, #334155 75%);
+    background-size: 200% 100%;
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-healthcare-600;
+  }
+
+  /* Focus ring */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-primary-500/40 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-surface-900;
+  }
+
+  /* Custom scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-surface-300 rounded-full;
+  }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-surface-600;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-surface-400;
+  }
+
+  /* Stat card accent border */
+  .stat-accent {
+    @apply relative overflow-hidden;
+  }
+  .stat-accent::before {
+    content: '';
+    @apply absolute top-0 left-0 w-1 h-full rounded-l-xl;
+  }
+  .stat-accent-teal::before {
+    @apply bg-primary-500;
+  }
+  .stat-accent-blue::before {
+    @apply bg-healthcare-500;
+  }
+  .stat-accent-amber::before {
+    @apply bg-amber-500;
+  }
+  .stat-accent-purple::before {
+    @apply bg-purple-500;
+  }
+  .stat-accent-rose::before {
+    @apply bg-rose-500;
+  }
+  .stat-accent-emerald::before {
+    @apply bg-emerald-500;
+  }
+}
+
+/* FullCalendar dark mode overrides */
+.dark .fc {
+  --fc-border-color: #334155;
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: #1e293b;
+  --fc-list-event-hover-bg-color: #334155;
+  --fc-today-bg-color: rgba(14, 165, 233, 0.08);
+}
+.dark .fc .fc-col-header-cell {
+  background: #1e293b;
+  color: #94a3b8;
+}
+.dark .fc .fc-timegrid-slot {
+  border-color: #1e293b;
+}
+.dark .fc .fc-button-primary {
+  background: #0f766e;
+  border-color: #0f766e;
+}
+.dark .fc .fc-button-primary:hover {
+  background: #0d9488;
+}
+.dark .fc .fc-button-primary:not(:disabled).fc-button-active {
+  background: #14b8a6;
+  border-color: #14b8a6;
+}
+.dark .fc .fc-toolbar-title {
+  color: #f1f5f9;
+}
+.dark .fc .fc-daygrid-day-number,
+.dark .fc .fc-col-header-cell-cushion {
+  color: #cbd5e1;
+}
+
+/* Toast overrides for dark mode */
+.dark .react-hot-toast [data-theme] {
+  background: #1e293b !important;
+  color: #f1f5f9 !important;
+}
